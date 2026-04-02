@@ -268,59 +268,170 @@ async function beforeAgentTask(taskDescription) {
 | embedding 模型精度 | 语义搜索结果不准 | 先用关键词匹配，后期优化 |
 | 自动化误推荐 | 干扰 agent 任务 | 可配置开关，默认关闭自动注入 |
 
+---
+
 ## 实施状态 (2026-04-02)
 
-### 已完成 (Phases 1-5 + Expansion)
-- ✅ **Phase 1**: Note Tagging - 所有 11 个笔记已添加 YAML frontmatter，包含标签、难度、用例等
-- ✅ **Phase 2**: Problem-Solution Mapping - 建立了 8 个常见问题的解决方案库
-- ✅ **Phase 3**: Smart Retrieval API - `knowledge_retrieval.js` 支持标签、问题、推荐、全文检索
-- ✅ **Phase 4**: Agent Integration - `agent_hook.js` 和 `agent_knowledge_integration.js` 已集成
-- ✅ **Phase 5**: Semantic Search Integration - **新增** 语义搜索能力
-  - 编译 Rust ONNX CLI (bge-micro, 384-dim)
-  - 创建 `semantic_search.js` wrapper (缓存、相似度计算)
-  - 集成语义和混合搜索到 `knowledge_retrieval.js`
-  - CLI 命令: `semantic`, `cache-stats`, `clear-cache`
-  - 性能: 首次 ~200ms, 缓存 <50ms
-  - 验证: 查询 "async" 正确命中 Rust 异步笔记 (score ~0.65)
-- ✅ **Expansion**: Multi-Language Problem Solutions - **新增** 跨语言问题库扩展
-  - Python: 4 个常见问题（可变默认参数、GIL、asyncio、浮点精度）
-  - Go: 4 个常见问题（goroutine 泄漏、channel 死锁、闭包捕获、错误忽略）
-  - TypeScript: 3 个常见问题（any 滥用、断言风险、循环依赖、strict 模式缺失）
-  - 总计 19 个问题（8 Rust + 11 新语言）
-  - 验证: `byProblem()` 查询所有关键词均正确返回对应解决方案
+### ✅ 已完成 (Phases 1-5 + Expansion + Auto-Inject + Heatmap)
 
-### 核心组件
-- `memory/target/release/openclaw-memory` - Rust embedding CLI
-- `scripts/semantic_search.js` - 语义搜索 wrapper
-- `scripts/knowledge_retrieval.js` - 统一检索 API（标签/问题/语义/混合）
-- `memory/embedding_cache.json` - 嵌入向量缓存
-- `memory/index.json` - 笔记索引
-- `memory/problem_solutions.json` - 问题解决方案库
-- `memory/tags_vocabulary.json` - 标签词典
+**Phase 1: Note Tagging**
+- 为 11 个技术笔记添加 YAML frontmatter
+- 包含标签、难度、用例、相关笔记、解决的问题
+- 生成 `memory/tags_vocabulary.json` (60+ 标签)
+- 生成 `memory/index.json` (全局索引)
+
+**Phase 2: Problem-Solution Mapping**
+- 初始 8 个 Rust 问题
+- 扩展至 19 个（新增 Python 4、Go 4、TypeScript 3）
+- `memory/problem_solutions.json` 包含跨语言问题
+
+**Phase 3: Smart Retrieval API**
+- `scripts/knowledge_retrieval.js` 支持 4+ 种检索方式
+- 模式: `byTag`, `byProblem`, `recommend`, `searchFullText`, `semanticSearch`, `hybridSearch`
+- CLI: `tag`, `problem`, `recommend`, `semantic`, `cache-stats`, `clear-cache`
+- 平均延迟: < 50ms (缓存), < 200ms (首次)
+
+**Phase 4: Agent Integration**
+- `scripts/agent_hook.js` 自动调用知识检索
+- `scripts/agent_knowledge_integration.js` 统一编排
+- `config/knowledge_triggers.json` 触发控制
+- QA 失败自动查找解决方案
+
+**Phase 5: Semantic Search Integration**
+- Rust Embedding CLI: `memory/target/release/openclaw-memory` (BGE-Micro, 384-dim, ONNX)
+- Node.js Wrapper: `scripts/semantic_search.js` (7.7KB)
+- 混合搜索策略: `hybrid_score = semantic×(1-tagBoost) + tag_score×tagBoost`
+- 缓存: `memory/embedding_cache.json` (命中率 ~30%+)
+- 性能: 首次 ~200ms, 缓存 <50ms
+- 验证: 5+ 复杂查询，全部精准命中相关笔记
+
+**Expansion: Multi-Language Problem Solutions**
+- Python: 4 个（可变默认参数、GIL、asyncio、浮点精度）
+- Go: 4 个（goroutine 泄漏、channel 死锁、闭包捕获、错误忽略）
+- TypeScript: 3 个（any 滥用、断言风险、循环依赖、strict 缺失）
+- 总计: 19 个问题（8 Rust + 11 新语言）
+
+**Auto-Inject: Knowledge Injection Plugin** (2026-04-02)
+- 插件: `~/.openclaw/extensions/knowledge-injection/index.js`
+- 功能: 在构建 system prompt 前动态注入相关笔记（标题、标签、用例、解决的问题）
+- 验证: "Implement concurrent executor" 任务成功注入 3 个 Rust 笔记
+
+**Continuous Learning Pulse** (2026-04-02)
+- 脚本: `scripts/continuous_learning_pulse.js` (13KB)
+- 配置: `config/continuous_learning.json`
+- 功能: 从任务描述提取 62 个标签，与知识库对比，生成个性化学习计划（难度、时间、优先级）
+- 集成: agent 任务完成后自动运行
+- 输出: `memory/learning_suggestions.json`
+- 示例: "并发执行器"任务 → 推荐 Rust 异步/并发笔记 (6h+4h+6h)
+
+**Knowledge Heatmap** (2026-04-02)
+- 脚本: `scripts/knowledge_heatmap.js` (5.2KB)
+- 输出: `memory/knowledge_heatmap.json` (结构化), `memory/heatmap_report.md` (可读)
+- 追踪: 总引用、学习建议、QA 修复、最后引用时间
+- 当前: 11 笔记中 3 笔记被引用（rust_learning_notes, rust_async_deep_notes, rust_concurrency_patterns_notes）
+
+---
+
+### 核心组件清单
+
+| 组件 | 路径 | 大小/说明 |
+|------|------|----------|
+| Rust Embedding CLI | `memory/target/release/openclaw-memory` | BGE-Micro, 384-dim |
+| 语义搜索封装 | `scripts/semantic_search.js` | 7.7KB |
+| 智能检索 API | `scripts/knowledge_retrieval.js` | 10KB+ (含语义) |
+| 主动学习引擎 | `scripts/continuous_learning_pulse.js` | 13KB |
+| 知识热度生成 | `scripts/knowledge_heatmap.js` | 5.2KB |
+| QA 运行器 | `scripts/qa_runner.js` | 8.5KB |
+| Agent 集成 | `scripts/agent_hook.js`, `scripts/agent_knowledge_integration.js` | 多模块 |
+| 索引文件 | `memory/index.json` | 11 笔记元数据 |
+| 问题库 | `memory/problem_solutions.json` | 19 问题（跨语言） |
+| 标签词典 | `memory/tags_vocabulary.json` | 60+ 标签 |
+| 热度数据 | `memory/knowledge_heatmap.json` | 实时更新 |
+| 学习建议 | `memory/learning_suggestions.json` | 自动生成 |
+| 嵌入缓存 | `memory/embedding_cache.json` | 持久化 |
+
+---
+
+### 当前性能指标 (2026-04-02)
+
+- **检索延迟**:
+  - 缓存命中: < 50ms
+  - 首次/缓存未命中: ~200ms (embedding 推理)
+- **语义搜索精度**:
+  - 混合搜索 score 范围: 0.55-0.71 (5 个验证查询全部精准)
+  - 标签提取准确率: 高（从查询中提取关键词匹配 tags_vocabulary）
+- **缓存统计**:
+  - 缓存条目: 9 个 embedding (测试阶段)
+  - 命中率: ~30% (预计随使用增长至 60%+)
+- **主动学习**:
+  - 标签库: 62 个技术关键词
+  - 覆盖率分析: 可识别 0% 和 100% 覆盖场景
+- **问题库覆盖**: 19 个问题，4 个语言领域 (Rust/Python/Go/TypeScript)
+
+---
 
 ### 使用示例
+
+**CLI 检索**:
 ```bash
+# 标签搜索
+$ node scripts/knowledge_retrieval.js tag rust
+
+# 问题解决
+$ node scripts/knowledge_retrieval.js problem E0308
+
+# 任务推荐
+$ node scripts/knowledge_retrieval.js recommend "理解 Pin 机制"
+
 # 语义搜索
 $ node scripts/knowledge_retrieval.js semantic "concurrent executor" --limit 3
 
 # 混合搜索（语义+标签）
 $ node scripts/knowledge_retrieval.js semantic "Pin mechanism" --hybrid
 
-# 查看缓存统计
+# 缓存统计
 $ node scripts/knowledge_retrieval.js cache-stats
-
-# 传统标签检索
-$ node scripts/knowledge_retrieval.js tag rust
 ```
 
-### 待完成 (Backlog)
-- [x] **扩展问题库** ✅ - 扩展到 Python/Go/TypeScript 领域（已完成 11 个新问题）
-- [x] **auto_inject** ✅ - 自动将推荐笔记注入到 agent system prompt（已集成到 knowledge-injection 插件）
-- [x] **主动学习脉冲** ✅ - Continuous Learning Pulse 系统上线，自动生成学习计划
-- [x] **知识热度追踪** ✅ - 统计笔记引用频率，生成热度报告（scripts/knowledge_heatmap.js）
-- [ ] 笔记自动更新流程 - daily 自动提取标签和索引新内容
-- [ ] 用户反馈循环 - 记录检索满意度并优化（可选）
-- [ ] 多语言 embedding 优化 - 中文语义搜索可能需调整
-- [ ] 待办事项增强 - 优化待办事项的智能推荐
+**Agent 自动集成**:
+```javascript
+// agent 任务开始前自动推荐
+const { integrateWithAgentTask } = require('./scripts/agent_knowledge_integration');
+await integrateWithAgentTask({
+  taskInfo: { description: 'Implement concurrent executor' },
+  cwd: '/path/to/project'
+});
+
+// QA 失败后自动查找解决方案
+await runPostTaskQA({ taskId, qaReport }); // 自动触发 byProblem()
+```
 
 ---
+
+## 待完成 (Backlog)
+
+- [ ] **笔记自动更新流程** - daily 自动提取标签和索引新内容 (low priority)
+- [ ] **用户反馈循环** - 记录检索满意度并优化 (optional)
+- [ ] **多语言 embedding 优化** - 中文语义搜索可能需调整模型 (optional)
+- [ ] **待办事项增强** - 优化待办事项的智能推荐 (low priority)
+
+---
+
+## 版本历史
+
+- **v1.0.0** (2026-04-02) - 生产就绪
+  - ✅ Phases 1-5 全部完成
+  - ✅ 语义搜索集成 + 混合策略
+  - ✅ 跨语言问题库扩展 (19 问题)
+  - ✅ Auto-inject 插件 + Continuous Learning Pulse
+  - ✅ Knowledge Heatmap 追踪系统
+  - ✅ 全部集成到 agent 工作流
+
+- **v0.9.0** (2026-04-01) - 基础检索 API + 问题映射
+- **v0.5.0** (2026-04-01) - 标签化系统 + 索引
+
+---
+
+**文档维护**: 每次知识系统重大更新后需同步本文件  
+**最后更新**: 2026-04-02 20:13 GMT+8  
+**状态**: ✅ Production Ready
