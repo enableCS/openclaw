@@ -314,7 +314,7 @@
 ## 🎯 八、Next Actions (待办事项)
 
 ### Immediate (1 天内)
-- [ ] **发布 v0.2.1**: 撰写 release notes, git tag push
+- [x] **发布 v0.2.1**: 撰写 release notes, git tag push ✅
 - [ ] **调整 timeout**: 国际引擎 8000ms → 3000ms
 - [ ] **Refactor MEMORY.md**: ✅ 已完成结构重构 (本文件)
 
